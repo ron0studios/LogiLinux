@@ -30,9 +30,30 @@ DevicePtr Library::findDevice(DeviceType type) {
     discoverDevices();
   }
 
-  for (const auto &device : pImpl->devices_) {
-    if (device->getType() == type) {
-      return device;
+  // For MX_KEYPAD, prefer hidraw devices over event devices
+  // because the keypad needs hidraw for LCD control and initialization
+  if (type == DeviceType::MX_KEYPAD) {
+    // First pass: look for hidraw device
+    for (const auto &device : pImpl->devices_) {
+      if (device->getType() == type) {
+        const auto &info = device->getInfo();
+        if (info.device_path.find("/dev/hidraw") != std::string::npos) {
+          return device;
+        }
+      }
+    }
+    // Second pass: if no hidraw found, return any matching device
+    for (const auto &device : pImpl->devices_) {
+      if (device->getType() == type) {
+        return device;
+      }
+    }
+  } else {
+    // For other devices, return first match
+    for (const auto &device : pImpl->devices_) {
+      if (device->getType() == type) {
+        return device;
+      }
     }
   }
 
