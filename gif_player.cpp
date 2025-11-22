@@ -10,6 +10,7 @@
 #include <sys/ioctl.h>
 #include <cerrno>
 #include <string>
+#include <chrono>
 
 constexpr size_t MAX_PACKET_SIZE = 4095;
 constexpr size_t LCD_SIZE = 118;
@@ -54,7 +55,15 @@ public:
         
         for (const auto& packet : packets) {
             write(fd, packet.data(), packet.size());
-            usleep(5000);
+            usleep(2000);  // Reduced delay for faster updates
+        }
+    }
+    
+    void setAllKeysImage(const std::vector<uint8_t>& jpegData) {
+        // Update all 9 keys with the same image, with delays between each key
+        for (int i = 0; i < 9; i++) {
+            setKeyImage(i, jpegData);
+            usleep(1000);  // Minimal delay between buttons
         }
     }
     
@@ -124,6 +133,66 @@ private:
     }
 };
 
+std::vector<uint8_t> extractGifFrameTile(const char* gifPath, int frameNum, int tileIndex) {
+    // Calculate grid dimensions: 3x3 grid of 118x118 tiles = 354x354 total
+    const int GRID_SIZE = 3;
+    const int TILE_SIZE = 118;
+    const int FULL_SIZE = GRID_SIZE * TILE_SIZE;  // 354x354
+    
+    int row = tileIndex / GRID_SIZE;
+    int col = tileIndex % GRID_SIZE;
+    int x_offset = col * TILE_SIZE;
+    int y_offset = row * TILE_SIZE;
+    
+    char tempfile[256];
+    char outfile[256];
+    snprintf(tempfile, sizeof(tempfile), "/tmp/gif_frame_%d_full.jpg", frameNum);
+    snprintf(outfile, sizeof(outfile), "/tmp/gif_frame_%d_tile_%d.jpg", frameNum, tileIndex);
+    
+    // First, extract and resize the full frame to 354x354
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), 
+             "convert '%s[%d]' -coalesce -resize %dx%d! %s 2>/dev/null",
+             gifPath, frameNum, FULL_SIZE, FULL_SIZE, tempfile);
+    
+    if (system(cmd) != 0) {
+        std::cerr << "Failed to extract frame " << frameNum << std::endl;
+        return {};
+    }
+    
+    // Now crop out the specific tile
+    snprintf(cmd, sizeof(cmd),
+             "convert %s -crop %dx%d+%d+%d -quality 85 %s 2>/dev/null",
+             tempfile, TILE_SIZE, TILE_SIZE, x_offset, y_offset, outfile);
+    
+    if (system(cmd) != 0) {
+        std::cerr << "Failed to crop tile " << tileIndex << std::endl;
+        unlink(tempfile);
+        return {};
+    }
+    
+    // Read the JPEG
+    FILE* f = fopen(outfile, "rb");
+    if (!f) {
+        std::cerr << "Failed to open tile JPEG" << std::endl;
+        unlink(tempfile);
+        return {};
+    }
+    
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    std::vector<uint8_t> jpeg(size);
+    fread(jpeg.data(), 1, size, f);
+    fclose(f);
+    
+    unlink(tempfile);
+    unlink(outfile);
+    
+    return jpeg;
+}
+
 std::vector<uint8_t> extractGifFrame(const char* gifPath, int frameNum) {
     char outfile[256];
     snprintf(outfile, sizeof(outfile), "/tmp/gif_frame_%d.jpg", frameNum);
@@ -174,14 +243,20 @@ int getFrameCount(const char* gifPath) {
 }
 
 int main(int argc, char* argv[]) {
-    const char* device_path = "/dev/hidraw1";
+    const char* device_path = "/dev/hidraw2";
     const char* gif_path = "earthrot.gif";
+    int target_fps = 20;  // Default to 5 FPS to be safer on device buffer
     
     if (argc > 1) {
         gif_path = argv[1];
     }
     if (argc > 2) {
         device_path = argv[2];
+    }
+    if (argc > 3) {
+        target_fps = atoi(argv[3]);
+        if (target_fps < 1) target_fps = 1;
+        if (target_fps > 30) target_fps = 30;
     }
     
     std::cout << "╔════════════════════════════════════════╗" << std::endl;
@@ -194,19 +269,22 @@ int main(int argc, char* argv[]) {
         int frameCount = getFrameCount(gif_path);
         std::cout << "\nLoaded GIF: " << gif_path << std::endl;
         std::cout << "Total frames: " << frameCount << std::endl;
-        std::cout << "Playing on all 9 cells..." << std::endl;
+        std::cout << "Target FPS: " << target_fps << std::endl;
+        std::cout << "Playing across entire 3x3 grid (354x354)..." << std::endl;
         std::cout << "Press Ctrl+C to exit\n" << std::endl;
         
+        int frame_delay_us = 1000000 / target_fps;
         int currentFrame = 0;
+        
         while (true) {
-            std::cout << "Frame " << currentFrame << "/" << (frameCount - 1) << std::endl;
+            auto frame_start = std::chrono::steady_clock::now();
             
-            // Extract current frame
-            auto jpeg = extractGifFrame(gif_path, currentFrame);
+            std::cout << "Frame " << currentFrame << "/" << (frameCount - 1) << std::flush;
             
-            if (!jpeg.empty()) {
-                // Display on all 9 cells
-                for (int i = 0; i < 9; i++) {
+            // Extract and display each tile of the current frame
+            for (int i = 0; i < 9; i++) {
+                auto jpeg = extractGifFrameTile(gif_path, currentFrame, i);
+                if (!jpeg.empty()) {
                     console.setKeyImage(i, jpeg);
                 }
             }
@@ -214,7 +292,15 @@ int main(int argc, char* argv[]) {
             // Move to next frame
             currentFrame = (currentFrame + 1) % frameCount;
             
-            usleep(100000); // 10 FPS (adjust as needed)
+            // Calculate remaining time and sleep to maintain frame rate
+            auto frame_end = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start).count();
+            int sleep_time = frame_delay_us - elapsed;
+            
+            if (sleep_time > 0) {
+                usleep(sleep_time);
+            }
+            std::cout << " (" << (elapsed / 1000) << "ms)" << std::endl;
         }
         
     } catch (const std::exception& e) {

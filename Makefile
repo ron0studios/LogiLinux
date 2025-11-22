@@ -1,6 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2
-TARGETS = hid_monitor tictactoe lcd_display tictactoe_lcd gif_player
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -ljpeg
+TARGETS = hid_monitor tictactoe lcd_display tictactoe_lcd gif_player navigation_grid
 
 all: $(TARGETS)
 
@@ -18,6 +18,12 @@ tictactoe_lcd: tictactoe_lcd.cpp
 
 gif_player: gif_player.cpp
 	$(CXX) $(CXXFLAGS) -o gif_player gif_player.cpp
+
+navigation_grid: navigation_grid.cpp
+	$(CXX) $(CXXFLAGS) -o navigation_grid navigation_grid.cpp -pthread
+
+giffer: giffer.cpp
+	$(CXX) $(CXXFLAGS) -o giffer giffer.cpp
 
 clean:
 	rm -f $(TARGETS)
@@ -37,6 +43,9 @@ run-tictactoe-lcd: tictactoe_lcd
 run-gif: gif_player
 	sudo ./gif_player
 
+run-nav: navigation_grid
+	sudo ./navigation_grid
+
 run: run-tictactoe-lcd
 
-.PHONY: all clean run run-monitor run-tictactoe run-lcd run-tictactoe-lcd run-gif
+.PHONY: all clean run run-monitor run-tictactoe run-lcd run-tictactoe-lcd run-gif run-nav

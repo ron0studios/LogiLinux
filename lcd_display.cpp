@@ -11,6 +11,7 @@
 #include <random>
 #include <cmath>
 #include <cstdio>
+#include <dirent.h>
 
 constexpr size_t MAX_PACKET_SIZE = 4095;
 constexpr size_t LCD_SIZE = 118;
@@ -250,19 +251,96 @@ std::vector<uint8_t> generateRandomPixelJPEG(int seed) {
     return jpeg;
 }
 
-int main(int argc, char* argv[]) {
-    const char* device_path = "/dev/hidraw1";
+std::vector<std::string> findHidrawDevices() {
+    std::vector<std::string> devices;
     
-    if (argc > 1) {
-        device_path = argv[1];
+    for (int i = 0; i < 20; i++) {
+        std::string path = "/dev/hidraw" + std::to_string(i);
+        int fd = open(path.c_str(), O_RDONLY);
+        if (fd >= 0) {
+            devices.push_back(path);
+            close(fd);
+        }
+    }
+    
+    return devices;
+}
+
+std::string getDeviceInfo(const std::string& device_path) {
+    int fd = open(device_path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        return "Unable to open";
+    }
+    
+    struct hidraw_devinfo info;
+    char name[256] = {0};
+    std::string result;
+    
+    if (ioctl(fd, HIDIOCGRAWINFO, &info) >= 0) {
+        char vendor_product[32];
+        snprintf(vendor_product, sizeof(vendor_product), "%04x:%04x", info.vendor, info.product);
+        result = vendor_product;
+        
+        if (ioctl(fd, HIDIOCGRAWNAME(sizeof(name)), name) >= 0) {
+            result += " - " + std::string(name);
+        }
+    }
+    
+    close(fd);
+    return result.empty() ? "Unknown device" : result;
+}
+
+std::string selectDevice() {
+    auto devices = findHidrawDevices();
+    
+    if (devices.empty()) {
+        std::cerr << "No HID devices found!" << std::endl;
+        std::cerr << "Make sure to run with sudo!" << std::endl;
+        return "";
     }
     
     std::cout << "╔════════════════════════════════════════╗" << std::endl;
+    std::cout << "║     Available HID Devices              ║" << std::endl;
+    std::cout << "╚════════════════════════════════════════╝" << std::endl;
+    std::cout << std::endl;
+    
+    for (size_t i = 0; i < devices.size(); i++) {
+        std::cout << "  [" << (i + 1) << "] " << devices[i] << std::endl;
+        std::cout << "      " << getDeviceInfo(devices[i]) << std::endl;
+        std::cout << std::endl;
+    }
+    
+    std::cout << "Select device (1-" << devices.size() << "), or 0 to quit: ";
+    
+    int choice;
+    std::cin >> choice;
+    
+    if (choice < 1 || choice > static_cast<int>(devices.size())) {
+        return "";
+    }
+    
+    return devices[choice - 1];
+}
+
+int main(int argc, char* argv[]) {
+    std::string device_path;
+    
+    if (argc > 1) {
+        device_path = argv[1];
+    } else {
+        device_path = selectDevice();
+        if (device_path.empty()) {
+            std::cout << "No device selected. Exiting." << std::endl;
+            return 0;
+        }
+    }
+    
+    std::cout << "\n╔════════════════════════════════════════╗" << std::endl;
     std::cout << "║  MX Creative Console LCD Display       ║" << std::endl;
     std::cout << "╚════════════════════════════════════════╝" << std::endl;
     
     try {
-        MXCreativeConsole console(device_path);
+        MXCreativeConsole console(device_path.c_str());
         
         std::cout << "\nDisplaying random pixels on all 9 buttons..." << std::endl;
         std::cout << "Each button will have 118x118 = 13,924 random colored pixels!\n" << std::endl;
