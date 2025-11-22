@@ -9,6 +9,7 @@
 #include <thread>
 #include <unistd.h>
 #include <set>
+#include <poll.h>
 
 namespace LogiLinux {
 
@@ -191,8 +192,28 @@ void MXKeypadDevice::startMonitoring() {
 
     constexpr size_t REPORT_SIZE = 256;
     std::vector<uint8_t> report(REPORT_SIZE);
+    
+    // Set up poll for event-driven reading
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
 
     while (impl_->monitoring) {
+      // Wait for data with 100ms timeout (same as dialpad)
+      int ret = poll(&pfd, 1, 100);
+      
+      if (ret < 0) {
+        break; // Error
+      }
+      
+      if (ret == 0) {
+        continue; // Timeout, check if still monitoring
+      }
+      
+      if (!(pfd.revents & POLLIN)) {
+        continue; // No data available
+      }
+
       int bytes_read = read(fd, report.data(), report.size());
 
       if (bytes_read > 0 && bytes_read >= 7) {
@@ -272,8 +293,6 @@ void MXKeypadDevice::startMonitoring() {
       if (bytes_read < 0 && errno != EAGAIN) {
         break;
       }
-
-      usleep(1000); // 1ms polling interval
     }
 
     close(fd);
