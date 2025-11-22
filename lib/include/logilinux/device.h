@@ -12,13 +12,15 @@ namespace LogiLinux {
 enum class DeviceType {
   UNKNOWN,
   DIALPAD,
-  CREATIVE_CONSOLE,
+  MX_KEYPAD,
 };
 
 enum class DeviceCapability {
   ROTATION,
   BUTTONS,
   HIGH_RES_SCROLL,
+  LCD_DISPLAY,
+  IMAGE_UPLOAD,
 };
 
 struct DeviceInfo {

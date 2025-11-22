@@ -1,6 +1,6 @@
 # LogiLinux - Logitech Device Library for Linux
 
-A C++ library and tools for interfacing with Logitech Creator devices on Linux, starting with the MX Dialpad. This was made for LauzHack 2025.
+A C++ library and tools for interfacing with Logitech Creator devices on Linux, including the MX Dialpad and MX Keypad. This was made for LauzHack 2025.
 
 ## What is This?
 
@@ -26,6 +26,7 @@ make -j$(nproc)
 
 ```bash
 sudo ./build/examples/dialpad-example
+sudo ./build/examples/mx-keypad-example  
 sudo ./build/examples/volume-example
 ```
 
@@ -49,14 +50,17 @@ void onEvent(LogiLinux::EventPtr event) {
     if (auto rotation = std::dynamic_pointer_cast<LogiLinux::RotationEvent>(event)) {
         std::cout << "Rotated: " << rotation->delta << " steps" << std::endl;
     }
+    if (auto button = std::dynamic_pointer_cast<LogiLinux::ButtonEvent>(event)) {
+        std::cout << "Button " << button->button_code << (button->pressed ? " pressed" : " released") << std::endl;
+    }
 }
 
 int main() {
     LogiLinux::Library lib;
-    auto dialpad = lib.findDevice(LogiLinux::DeviceType::DIALPAD);
+    auto device = lib.findDevice(LogiLinux::DeviceType::DIALPAD);  // or MX_KEYPAD
 
-    dialpad->setEventCallback(onEvent);
-    dialpad->startMonitoring();
+    device->setEventCallback(onEvent);
+    device->startMonitoring();
 
     return 0;
 }
@@ -91,9 +95,17 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-## Device Information
+## Supported Devices
 
-- Model: Logitech MX Dialpad
+### MX Dialpad
+- Model: Logitech MX Dialpad  
 - Vendor ID: `046d` (Logitech)
 - Product ID: `bc00`
+- Features: Rotation, button press, high-resolution scrolling
 - Protocol: HID++ 4.5
+
+### MX Keypad
+- Model: Logitech MX Creative Console / MX Keypad
+- Vendor ID: `046d` (Logitech) 
+- Features: 9 programmable LCD buttons, navigation buttons
+- Capabilities: Button events, LCD image display, JPEG upload

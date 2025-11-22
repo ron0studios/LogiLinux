@@ -31,6 +31,12 @@ private:
   std::unique_ptr<DeviceInfo> probeDevice(const std::string &device_path);
 
   /**
+   * Check if a hidraw device is a Logitech device
+   * Returns DeviceInfo if valid, nullptr otherwise
+   */
+  std::unique_ptr<DeviceInfo> probeHidrawDevice(const std::string &device_path);
+
+  /**
    * Identify device type from VID/PID
    */
   DeviceType identifyDeviceType(uint16_t vendor_id, uint16_t product_id);

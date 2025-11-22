@@ -5,3 +5,6 @@ target_link_libraries(dialpad-example PRIVATE logilinux)
 
 add_executable(volume-example volume-example.cpp)
 target_link_libraries(volume-example PRIVATE logilinux)
+
+add_executable(mx-keypad-example mx-keypad-example.cpp)
+target_link_libraries(mx-keypad-example PRIVATE logilinux)

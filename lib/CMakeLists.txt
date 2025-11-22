@@ -6,6 +6,7 @@ set(LOGILINUX_SOURCES
     src/core/device_manager.cpp
     src/core/input_monitor.cpp
     src/devices/dialpad_device.cpp
+    src/devices/mx_keypad_device.cpp
 )
 
 # Create shared library

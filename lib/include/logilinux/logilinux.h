@@ -5,11 +5,20 @@
 #include "events.h"
 #include "version.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace LogiLinux {
+
+// Forward declaration for Creative Console device-specific API
+class CreativeConsoleDevice;
+
+namespace detail {
+bool hasLCD(CreativeConsoleDevice *device);
+}
+
 
 class Library {
 public:

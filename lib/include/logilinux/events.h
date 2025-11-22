@@ -19,6 +19,21 @@ enum class DialpadButton {
   UNKNOWN = 0
 };
 
+enum class MXKeypadButton {
+  GRID_0 = 0,
+  GRID_1 = 1,
+  GRID_2 = 2,
+  GRID_3 = 3,
+  GRID_4 = 4,
+  GRID_5 = 5,
+  GRID_6 = 6,
+  GRID_7 = 7,
+  GRID_8 = 8,
+  P1_LEFT = 0xa1,
+  P2_RIGHT = 0xa2,
+  UNKNOWN = 0xff
+};
+
 enum class EventType {
   ROTATION,
   BUTTON_PRESS,
@@ -93,6 +108,49 @@ inline const char *getDialpadButtonName(DialpadButton button) {
     return "BOTTOM_LEFT";
   case DialpadButton::BOTTOM_RIGHT:
     return "BOTTOM_RIGHT";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+inline MXKeypadButton getMXKeypadButton(uint32_t button_code) {
+  if (button_code >= 0 && button_code <= 8) {
+    return static_cast<MXKeypadButton>(button_code);
+  }
+  switch (button_code) {
+  case 0xa1:
+    return MXKeypadButton::P1_LEFT;
+  case 0xa2:
+    return MXKeypadButton::P2_RIGHT;
+  default:
+    return MXKeypadButton::UNKNOWN;
+  }
+}
+
+inline const char *getMXKeypadButtonName(MXKeypadButton button) {
+  switch (button) {
+  case MXKeypadButton::GRID_0:
+    return "GRID_0";
+  case MXKeypadButton::GRID_1:
+    return "GRID_1";
+  case MXKeypadButton::GRID_2:
+    return "GRID_2";
+  case MXKeypadButton::GRID_3:
+    return "GRID_3";
+  case MXKeypadButton::GRID_4:
+    return "GRID_4";
+  case MXKeypadButton::GRID_5:
+    return "GRID_5";
+  case MXKeypadButton::GRID_6:
+    return "GRID_6";
+  case MXKeypadButton::GRID_7:
+    return "GRID_7";
+  case MXKeypadButton::GRID_8:
+    return "GRID_8";
+  case MXKeypadButton::P1_LEFT:
+    return "P1_LEFT";
+  case MXKeypadButton::P2_RIGHT:
+    return "P2_RIGHT";
   default:
     return "UNKNOWN";
   }
