@@ -216,7 +216,48 @@ void MXKeypadDevice::startMonitoring() {
 
       int bytes_read = read(fd, report.data(), report.size());
 
-      if (bytes_read > 0 && bytes_read >= 7) {
+      // P1/P2 navigation button detection - CHECK THIS FIRST
+      // Format: 11 ff 0b 00 01 a1/a2 (press) or 11 ff 0b 00 00 00 (release)
+      // IMPORTANT: When P buttons are pressed, report[6] contains spurious grid data
+      // We must process P button events first and skip grid processing for those packets
+      bool is_p_button_event = false;
+      
+      if (bytes_read >= 6 && report[0] == 0x11 && report[1] == 0xff && 
+          report[2] == 0x0b && report[3] == 0x00) {
+        is_p_button_event = true;
+        
+        if (report[4] == 0x01 && (report[5] == 0xa1 || report[5] == 0xa2)) {
+          // Button press
+          impl_->last_p_button = report[5]; // Track which button was pressed
+          auto event = std::make_shared<ButtonEvent>();
+          event->type = EventType::BUTTON_PRESS;
+          event->button_code = report[5]; // 0xa1 or 0xa2
+          event->pressed = true;
+          event->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch()).count();
+
+          if (event_callback_) {
+            event_callback_(event);
+          }
+        } else if (report[4] == 0x00 && impl_->last_p_button != 0) {
+          // Button release - emit event for the last pressed P button
+          auto event = std::make_shared<ButtonEvent>();
+          event->type = EventType::BUTTON_RELEASE;
+          event->button_code = impl_->last_p_button; // Use tracked button code
+          event->pressed = false;
+          event->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch()).count();
+
+          if (event_callback_) {
+            event_callback_(event);
+          }
+          
+          impl_->last_p_button = 0; // Clear tracking
+        }
+      }
+
+      // Grid button detection - SKIP if this was a P button event packet
+      if (!is_p_button_event && bytes_read > 0 && bytes_read >= 7) {
         static uint8_t last_state = 0;
         uint8_t current_state = report[6];
 
@@ -269,41 +310,6 @@ void MXKeypadDevice::startMonitoring() {
         }
         
         last_state = current_state;
-      }
-      
-      // P1/P2 navigation button detection
-      // Format: 11 ff 0b 00 01 a1/a2 (press) or 11 ff 0b 00 00 00 (release)
-      if (bytes_read >= 6 && report[0] == 0x11 && report[1] == 0xff && 
-          report[2] == 0x0b && report[3] == 0x00) {
-        
-        if (report[4] == 0x01 && (report[5] == 0xa1 || report[5] == 0xa2)) {
-          // Button press
-          impl_->last_p_button = report[5]; // Track which button was pressed
-          auto event = std::make_shared<ButtonEvent>();
-          event->type = EventType::BUTTON_PRESS;
-          event->button_code = report[5]; // 0xa1 or 0xa2
-          event->pressed = true;
-          event->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now().time_since_epoch()).count();
-
-          if (event_callback_) {
-            event_callback_(event);
-          }
-        } else if (report[4] == 0x00 && impl_->last_p_button != 0) {
-          // Button release - emit event for the last pressed P button
-          auto event = std::make_shared<ButtonEvent>();
-          event->type = EventType::BUTTON_RELEASE;
-          event->button_code = impl_->last_p_button; // Use tracked button code
-          event->pressed = false;
-          event->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now().time_since_epoch()).count();
-
-          if (event_callback_) {
-            event_callback_(event);
-          }
-          
-          impl_->last_p_button = 0; // Clear tracking
-        }
       }
 
       if (bytes_read < 0 && errno != EAGAIN) {
