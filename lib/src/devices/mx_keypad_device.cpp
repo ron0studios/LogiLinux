@@ -406,32 +406,9 @@ bool MXKeypadDevice::setKeyImage(int keyIndex,
 
   auto packets = impl_->generateImagePackets(keyIndex, jpegData);
 
-  // FAST WRITE: Send all packets without delays
-  // The WebHID implementation sends packets sequentially without delays
-  // Only add minimal delay if write() returns EAGAIN/EWOULDBLOCK
   for (const auto &packet : packets) {
-    ssize_t written = 0;
-    int retries = 0;
-    const int MAX_RETRIES = 10;
-
-    while (written < 0 && retries < MAX_RETRIES) {
-      written = write(impl_->hidraw_fd, packet.data(), packet.size());
-
-      if (written < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-          // Device buffer full, wait a tiny bit and retry
-          usleep(100); // 0.1ms instead of 2ms
-          retries++;
-        } else {
-          // Actual error
-          return false;
-        }
-      }
-    }
-
-    if (written < 0) {
-      return false; // Failed after retries
-    }
+    write(impl_->hidraw_fd, packet.data(), packet.size());
+    usleep(2000);
   }
 
   return true;
