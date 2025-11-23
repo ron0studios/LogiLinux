@@ -279,48 +279,54 @@ void MXKeypadDevice::startMonitoring() {
 
       // Grid button detection - SKIP if this was a P button event packet
       if (!is_p_button_event && bytes_read > 0 && bytes_read >= 7) {
-        static uint8_t last_state = 0;
-        uint8_t current_state = report[6];
-
-        // Grid button detection (1-9 = buttons, 0 = no button)
-        // IMPORTANT: Hardware quirk - when releasing buttons 2-9, the state
-        // transitions through button 1 before reaching 0. Pattern: button_n → 1
-        // → 0 We must ignore transitions TO button 1 unless coming FROM state 0
-
-        if (current_state >= 1 && current_state <= 9) {
-          uint8_t button_code = current_state - 1;
-
-          // Ignore transition to button 1 (state=1) if not from idle (state=0)
-          // This filters out the spurious button 1 events during other button
-          // releases
-          if (current_state == 1 && last_state != 0) {
-            // Skip this spurious button 1 event - it's part of another button's
-            // release
-            last_state = current_state;
-            continue;
-          }
-
-          // Real button press - add to set if not already there
-          if (impl_->pressed_buttons.find(button_code) ==
-              impl_->pressed_buttons.end()) {
-            impl_->pressed_buttons.insert(button_code);
-
-            auto event = std::make_shared<ButtonEvent>();
-            event->type = EventType::BUTTON_PRESS;
-            event->button_code = button_code;
-            event->pressed = true;
-            event->timestamp =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch())
-                    .count();
-
-            if (event_callback_) {
-              event_callback_(event);
+        // Grid button report format: 13 ff 02 00 xx 01 [button_codes...]
+        // Bytes 6+ contain ALL currently pressed button codes (1-9), terminated by 0
+        // This allows multiple simultaneous button presses!
+        
+        if (report[0] == 0x13 && report[1] == 0xff && report[2] == 0x02 && 
+            report[3] == 0x00 && report[5] == 0x01) {
+          
+          // Collect all currently pressed buttons from this report
+          std::set<uint8_t> current_pressed;
+          
+          for (size_t i = 6; i < bytes_read; i++) {
+            uint8_t button_code_raw = report[i];
+            if (button_code_raw == 0) break;  // End of button list
+            
+            if (button_code_raw >= 1 && button_code_raw <= 9) {
+              uint8_t button_code = button_code_raw - 1;  // Convert to 0-8
+              current_pressed.insert(button_code);
             }
           }
-        } else if (current_state == 0) {
-          // No button pressed - release all currently pressed buttons
+          
+          // Find newly pressed buttons (in current but not in previous)
+          for (uint8_t button_code : current_pressed) {
+            if (impl_->pressed_buttons.find(button_code) == impl_->pressed_buttons.end()) {
+              // New button press
+              auto event = std::make_shared<ButtonEvent>();
+              event->type = EventType::BUTTON_PRESS;
+              event->button_code = button_code;
+              event->pressed = true;
+              event->timestamp =
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count();
+
+              if (event_callback_) {
+                event_callback_(event);
+              }
+            }
+          }
+          
+          // Find released buttons (in previous but not in current)
+          std::vector<uint8_t> to_release;
           for (uint8_t button_code : impl_->pressed_buttons) {
+            if (current_pressed.find(button_code) == current_pressed.end()) {
+              to_release.push_back(button_code);
+            }
+          }
+          
+          for (uint8_t button_code : to_release) {
             auto event = std::make_shared<ButtonEvent>();
             event->type = EventType::BUTTON_RELEASE;
             event->button_code = button_code;
@@ -334,10 +340,10 @@ void MXKeypadDevice::startMonitoring() {
               event_callback_(event);
             }
           }
-          impl_->pressed_buttons.clear();
+          
+          // Update tracked state
+          impl_->pressed_buttons = current_pressed;
         }
-
-        last_state = current_state;
       }
 
       if (bytes_read < 0 && errno != EAGAIN) {
