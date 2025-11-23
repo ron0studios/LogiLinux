@@ -10,6 +10,7 @@
 #include <poll.h>
 #include <set>
 #include <sys/ioctl.h>
+#include <sys/uio.h>
 #include <thread>
 #include <unistd.h>
 
@@ -48,27 +49,42 @@ struct MXKeypadDevice::Impl {
 
   std::vector<std::vector<uint8_t>>
   generateImagePackets(int keyIndex, const std::vector<uint8_t> &jpegData) {
-    std::vector<std::vector<uint8_t>> result;
+    // Pre-calculate packet count to avoid reallocations
+    const size_t PACKET1_HEADER = 20;
+    const size_t SUBSEQUENT_HEADER = 5;
 
+    size_t totalPackets = 1; // At least first packet
+    size_t remainingAfterFirst = jpegData.size() > (MAX_PACKET_SIZE - PACKET1_HEADER)
+                                ? jpegData.size() - (MAX_PACKET_SIZE - PACKET1_HEADER)
+                                : 0;
+    if (remainingAfterFirst > 0) {
+      totalPackets += (remainingAfterFirst + (MAX_PACKET_SIZE - SUBSEQUENT_HEADER) - 1) /
+                     (MAX_PACKET_SIZE - SUBSEQUENT_HEADER);
+    }
+
+    std::vector<std::vector<uint8_t>> result;
+    result.reserve(totalPackets);
+
+    // Calculate key position
     int row = keyIndex / 3;
     int col = keyIndex % 3;
     uint16_t x = 23 + col * (118 + 40);
     uint16_t y = 6 + row * (118 + 40);
 
-    const size_t PACKET1_HEADER = 20;
-    size_t byteCount1 =
-        std::min(jpegData.size(), MAX_PACKET_SIZE - PACKET1_HEADER);
+    // First packet with 20-byte header
+    size_t byteCount1 = std::min(jpegData.size(), MAX_PACKET_SIZE - PACKET1_HEADER);
+    result.emplace_back(MAX_PACKET_SIZE, 0);
+    auto &packet1 = result.back();
 
-    std::vector<uint8_t> packet1(MAX_PACKET_SIZE, 0);
-    std::copy(jpegData.begin(), jpegData.begin() + byteCount1,
-              packet1.begin() + PACKET1_HEADER);
+    // Copy image data
+    std::copy(jpegData.begin(), jpegData.begin() + byteCount1, packet1.begin() + PACKET1_HEADER);
 
+    // Set packet header
     packet1[0] = 0x14;
     packet1[1] = 0xff;
     packet1[2] = 0x02;
     packet1[3] = 0x2b;
-    packet1[4] =
-        generateWritePacketByte(1, true, byteCount1 >= jpegData.size());
+    packet1[4] = generateWritePacketByte(1, true, byteCount1 >= jpegData.size());
     packet1[5] = 0x01;
     packet1[6] = 0x00;
     packet1[7] = 0x01;
@@ -84,29 +100,28 @@ struct MXKeypadDevice::Impl {
     packet1[18] = (jpegData.size() >> 8) & 0xff;
     packet1[19] = jpegData.size() & 0xff;
 
-    result.push_back(packet1);
-
+    // Subsequent packets with 5-byte header
     size_t remainingBytes = jpegData.size() - byteCount1;
     size_t currentOffset = byteCount1;
     int part = 2;
 
     while (remainingBytes > 0) {
-      const size_t headerSize = 5;
-      size_t byteCount = std::min(remainingBytes, MAX_PACKET_SIZE - headerSize);
+      size_t byteCount = std::min(remainingBytes, MAX_PACKET_SIZE - SUBSEQUENT_HEADER);
 
-      std::vector<uint8_t> packet(MAX_PACKET_SIZE, 0);
+      result.emplace_back(MAX_PACKET_SIZE, 0);
+      auto &packet = result.back();
+
+      // Copy image data
       std::copy(jpegData.begin() + currentOffset,
                 jpegData.begin() + currentOffset + byteCount,
-                packet.begin() + headerSize);
+                packet.begin() + SUBSEQUENT_HEADER);
 
+      // Set packet header
       packet[0] = 0x14;
       packet[1] = 0xff;
       packet[2] = 0x02;
       packet[3] = 0x2b;
-      packet[4] =
-          generateWritePacketByte(part, false, remainingBytes - byteCount == 0);
-
-      result.push_back(packet);
+      packet[4] = generateWritePacketByte(part, false, remainingBytes - byteCount == 0);
 
       remainingBytes -= byteCount;
       currentOffset += byteCount;
@@ -406,12 +421,28 @@ bool MXKeypadDevice::setKeyImage(int keyIndex,
 
   auto packets = impl_->generateImagePackets(keyIndex, jpegData);
 
-  for (const auto &packet : packets) {
-    write(impl_->hidraw_fd, packet.data(), packet.size());
-    usleep(2000);
+  if (packets.empty()) {
+    return false;
   }
 
-  return true;
+  // Optimized: Send all packets in a single system call using writev
+  // This eliminates the 2ms delays between packets and reduces system calls
+  std::vector<iovec> iov;
+  iov.reserve(packets.size());
+
+  for (const auto &packet : packets) {
+    iov.push_back({const_cast<uint8_t*>(packet.data()), packet.size()});
+  }
+
+  ssize_t totalWritten = writev(impl_->hidraw_fd, iov.data(), iov.size());
+
+  // Check if all data was written
+  ssize_t expectedTotal = 0;
+  for (const auto &packet : packets) {
+    expectedTotal += packet.size();
+  }
+
+  return totalWritten == expectedTotal;
 }
 
 bool MXKeypadDevice::setKeyColor(int keyIndex, uint8_t r, uint8_t g,
